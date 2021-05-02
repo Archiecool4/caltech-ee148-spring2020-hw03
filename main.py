@@ -8,6 +8,14 @@ from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.data.sampler import SubsetRandomSampler
 
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import confusion_matrix
+from sklearn.manifold import TSNE
+from sklearn.neighbors import NearestNeighbors
+import numpy as np
+from PIL import Image
+import matplotlib.pyplot as plt
+
 import os
 
 '''
@@ -83,9 +91,60 @@ class Net(nn.Module):
     '''
     def __init__(self):
         super(Net, self).__init__()
+        self.conv1 = nn.Conv2d(1, 8, 5, 1)
+        self.conv2 = nn.Conv2d(8, 8, 5, 1, 2)
+        self.conv3 = nn.Conv2d(8, 16, 5, 1)
+        self.drop1 = nn.Dropout2d()
+        self.drop2 = nn.Dropout2d()
+        self.drop3 = nn.Dropout2d()
+        self.fc1 = nn.Linear(256, 64)
+        self.bn1 = nn.BatchNorm1d(64)
+        self.fc2 = nn.Linear(64, 10)
+
+    def _feature(self, x):
+        x = self.conv1(x)
+        x = F.relu(x)
+        x = self.drop1(x)
+        x = self.conv2(x)
+        x = F.relu(x)
+        x = F.max_pool2d(x, 2)
+
+        x = self.drop2(x)
+        x = self.conv3(x)
+        x = F.relu(x)
+        x = self.drop3(x)
+        x = F.max_pool2d(x, 2)
+
+        x = torch.flatten(x, 1)
+        x = self.fc1(x)
+        x = F.relu(x)
+
+        return x
 
     def forward(self, x):
-        return x
+        x = self.conv1(x)
+        x = F.relu(x)
+        x = self.drop1(x)
+        x = self.conv2(x)
+        x = F.relu(x)
+        x = F.max_pool2d(x, 2)
+
+        x = self.drop2(x)
+        x = self.conv3(x)
+        x = F.relu(x)
+        x = self.drop3(x)
+        x = F.max_pool2d(x, 2)  
+
+        x = torch.flatten(x, 1)
+        x = self.fc1(x)
+        x = F.relu(x)
+        x = self.bn1(x)
+        x = F.relu(x)
+        x = self.fc2(x)
+
+        output = F.log_softmax(x, dim=1)
+        return output
+
 
 
 def train(args, model, device, train_loader, optimizer, epoch):
@@ -172,7 +231,7 @@ def main():
         assert os.path.exists(args.load_model)
 
         # Set the test model
-        model = fcNet().to(device)
+        model = Net().to(device)
         model.load_state_dict(torch.load(args.load_model))
 
         test_dataset = datasets.MNIST('../data', train=False,
@@ -184,7 +243,122 @@ def main():
         test_loader = torch.utils.data.DataLoader(
             test_dataset, batch_size=args.test_batch_size, shuffle=True, **kwargs)
 
-        test(model, device, test_loader)
+        # test(model, device, test_loader)
+
+        # To get closest images:
+        # model.eval()
+        # vectors = []
+        # imgs = []
+        # for x, y in test_loader:
+        #     imgs.extend(x)
+        #     vectors.extend(model._feature(x).detach().numpy())
+
+        # vectors = np.asarray(vectors)
+
+        # neigh = NearestNeighbors(n_neighbors=8)
+        # neigh.fit(vectors)
+
+        # neighbors = []
+        # for i in range(4):
+        #     vector = vectors[i]
+        #     idxs = neigh.kneighbors(vector.reshape(1, -1), 9, return_distance=False)[0]
+        #     temp = []
+        #     temp.extend(imgs[i])
+        #     for idx in idxs[1:]:
+        #         v = imgs[idx].numpy()
+        #         temp.extend(v)
+        #     neighbors.append(temp)
+
+        # plt.figure()
+        # plt.title('Closest 8 Images to Chosen Samples')
+        # for i in range(4):
+        #     vector = vectors[i]
+        #     for j in range(9):
+        #         plt.subplot2grid((4,9), (i,j))
+        #         plt.imshow(neighbors[i][j])
+        # plt.show()
+
+        # To get tSNE embeddings:
+        # model.eval()
+        # vectors = []
+        # ys = []
+        # for x, y in test_loader:
+        #     vectors.extend(model._feature(x).detach().numpy())
+        #     ys.extend(y.numpy())
+
+        # embeds = TSNE(n_components=2, verbose=1).fit_transform(np.asarray(vectors))
+        
+        # cols = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple',
+        #         'tab:brown', 'tab:pink', 'tab:gray', 'tab:olive', 'tab:cyan']
+        # for c in cols:
+        #     plt.plot((0, 0), color=c)
+        # for em, y in zip(embeds, ys):
+        #     plt.plot(em, color=cols[y])
+        # plt.title('tSNE Embeddings of Digits')
+        # plt.legend(range(10), bbox_to_anchor=(1, 1), loc='upper left')
+        # plt.show()
+
+        # To get confusion matrix
+        # model.eval()
+        # y_pred = []
+        # y_true = []
+        # for x, y in test_loader:
+        #     pred = model(x).argmax(dim=1).numpy()
+        #     y_pred.extend(pred)
+        #     y_true.extend(y)
+        
+        # cf_matrix = confusion_matrix(y_true, y_pred)
+        # print(cf_matrix)
+        # plt.matshow(cf_matrix)
+        # plt.xlabel('Predicted Class')
+        # plt.ylabel('True Class')
+        # plt.title('Confusion Matrix')
+        # plt.colorbar()
+        # plt.show()
+
+
+        # To visuaize kernels:
+        # model.eval()
+        # for x, y in test_loader:
+        #     for img, lbl in zip(x, y):
+        #         for child in model.named_children():
+        #             print(child)
+        #             output = child[1](img.unsqueeze(0)).detach().numpy()[0, ...]
+        #             plt.subplot(3, 3, 1)
+        #             plt.imshow(img.numpy()[0, ...])
+        #             plt.colorbar()
+        #             for k in range(len(output)):
+        #                 plt.subplot(3, 3, k + 2)
+        #                 plt.imshow(output[k, ...])
+        #                 plt.colorbar()
+        #             plt.tight_layout()
+        #             plt.show()
+        #             break
+        #         break
+        #     break
+        
+        # To gather incorrect samples:
+        # model.eval()
+        # samples = []
+        # lbls = []
+        # for x, y in test_loader:
+        #     for img, lbl in zip(x, y):
+        #         pred = model(img.unsqueeze(0)).argmax(dim=1).numpy().squeeze()
+        #         if pred != lbl.numpy().squeeze():
+        #             samples.append(img.numpy()[0, ...])
+        #             lbls.append((pred, lbl.numpy().squeeze()))
+        #         if len(samples) == 9:
+        #             break
+        #     else:
+        #         continue
+        #     break
+        
+        # for i, s in enumerate(samples):
+        #     plt.subplot(3, 3, i + 1)
+        #     plt.imshow(s)
+        #     plt.title(f'Predicted Label: {lbls[i][0]}\nActual Label: {lbls[i][1]}')
+        # plt.tight_layout()
+        # plt.show()
 
         return
 
@@ -199,20 +373,51 @@ def main():
     # training by using SubsetRandomSampler. Right now the train and validation
     # sets are built from the same indices - this is bad! Change it so that
     # the training and validation sets are disjoint and have the correct relative sizes.
-    subset_indices_train = range(len(train_dataset))
-    subset_indices_valid = range(len(train_dataset))
+
+    trans = transforms.Compose([
+        transforms.Resize((31, 31), transforms.InterpolationMode.NEAREST),
+        transforms.RandomCrop((28, 28)),
+        transforms.RandomRotation(30),
+        transforms.ToTensor()
+    ])
+    
+    clazzes = [[] for _ in range(10)]
+    for x, y in train_dataset:
+        # To randomly sample subset of data:
+        # if np.random.uniform() > 0.9375:
+        clazzes[y].append(x.numpy())
+    x_train = []
+    x_val = []
+    y_train = []
+    y_val = []
+    for i, clazz in enumerate(clazzes):
+        train_split, val_split = train_test_split(clazz, test_size=0.15, random_state=42)
+        # To do data augmentation:
+        # train_split = list(map(lambda x: np.asarray(trans(Image.fromarray(x[0, ...]))), train_split))
+        x_train.extend(train_split)
+        y_train.extend(i * torch.ones(len(train_split)))
+        x_val.extend(val_split)
+        y_val.extend(i * torch.ones(len(val_split)))
+
+    print('Training Samples:', len(x_train))
+    x_train = torch.FloatTensor(x_train)[:len(x_train)]
+    y_train = torch.LongTensor(y_train)[:len(y_train)]
+    x_val = torch.FloatTensor(x_val)
+    y_val = torch.LongTensor(y_val)
+
+    train_data = torch.utils.data.TensorDataset(x_train, y_train)
+    val_data = torch.utils.data.TensorDataset(x_val, y_val)
 
     train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=args.batch_size,
-        sampler=SubsetRandomSampler(subset_indices_train)
+        train_data, batch_size=args.batch_size, shuffle=True
     )
     val_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=args.test_batch_size,
-        sampler=SubsetRandomSampler(subset_indices_valid)
+        val_data, batch_size=args.batch_size, shuffle=True
     )
 
     # Load your model [fcNet, ConvNet, Net]
-    model = ConvNet().to(device)
+    # model = ConvNet().to(device)
+    model = Net().to(device)
 
     # Try different optimzers here [Adam, SGD, RMSprop]
     optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
@@ -229,7 +434,7 @@ def main():
         # You may optionally save your model at each epoch here
 
     if args.save_model:
-        torch.save(model.state_dict(), "mnist_model.pt")
+        torch.save(model.state_dict(), "model.pt")
 
 
 if __name__ == '__main__':
